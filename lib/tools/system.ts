@@ -13,12 +13,13 @@ export const systemTools: ToolDef[] = [
     handler: async (_a, ctx) => {
       try {
         await ctx.client.request(`query{ pages { list(limit:1){ id } } }`);
-        return ok({ connected: true, authenticated: true, baseUrl: ctx.baseUrl, hasToken: ctx.hasToken });
+        return ok({ connected: true, authenticated: true, baseUrl: ctx.baseUrl, hasToken: ctx.hasToken, profile: ctx.profile ?? null });
       } catch (e) {
         return ok({
           connected: false,
           baseUrl: ctx.baseUrl,
           hasToken: ctx.hasToken,
+          profile: ctx.profile ?? null,
           error: e instanceof Error ? e.message : String(e),
         });
       }

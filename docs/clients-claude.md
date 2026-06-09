@@ -2,28 +2,31 @@
 
 Voraussetzung: Der Server ist auf Vercel deployt → Endpoint `https://<deploy>/mcp`. (Lokal: `npm run dev` → `http://localhost:3030/mcp`.)
 
-Zur Erinnerung die [3 Auth-Muster](./README.md#das-wichtigste-zuerst-die-3-wege-zugangsdaten-zu-übergeben): **A** = Server-Env, **B** = Header, **C** = URL-Parameter.
+**Zwei Wege, deinen Zugang zu übergeben:**
+- **Empfohlen — Profil-Handle:** Der Betreiber hat dich in `WIKIJS_PROFILES` angelegt; du bekommst einen **geheimen Handle** (`wzp_…`). Du sendest **nur den Handle** — der echte Wiki.js-Key bleibt serverseitig und gelangt nie zu Claude. Siehe [Profile & Handle](../README.md#mehrbenutzer-profile--handle-generierung).
+- **Direktes BYOK:** Du sendest deine **Wiki.js-URL + deinen echten API-Key** selbst (für Deployments ohne Profile).
+
+> ℹ️ Claude **Code (CLI)** und **Cursor** können Custom-Header → Handle/Key bleibt aus der URL. **claude.ai (Web-Connector)** kann **keine** Header → dort kommt der Handle in die URL (`?token=`).
 
 ---
 
-## 1. Claude Code (CLI) — Muster B (eigener Key pro User via Header) ✅
-
-Claude Code unterstützt Custom-Header für Remote-MCP-Server. Das ist der direkteste Weg für „jeder User seinen eigenen Key".
+## 1. Claude Code (CLI) — via Header ✅
 
 ```bash
+# Empfohlen: nur der geheime Handle (Key bleibt serverseitig)
+claude mcp add --transport http wikijs https://<deploy>/mcp \
+  --header "X-Wikijs-Token: wzp_DEIN_GEHEIMER_HANDLE"
+```
+```bash
+# Alternative ohne Profile (direktes BYOK): URL + echter Key
 claude mcp add --transport http wikijs https://<deploy>/mcp \
   --header "X-Wikijs-Url: https://dein-wiki.example.org" \
   --header "Authorization: Bearer DEIN_WIKIJS_API_KEY"
 ```
 
-- Mehrere `--header` sind erlaubt. Statt `Authorization: Bearer …` geht auch `--header "X-Wikijs-Token: DEIN_KEY"`.
-- Scope wählen: `-s local` (nur du, dieses Projekt – Default), `-s project` (ins eingecheckte `.mcp.json`, **ohne** echten Key committen!), `-s user` (alle deine Projekte).
-- Prüfen: `claude mcp list` und `claude mcp get wikijs`.
-
-Optional eine eigene, strengere Policy nur für dich:
-```bash
-  --header "X-Wikijs-Preset: editor"
-```
+- Mehrere `--header` erlaubt — z. B. zusätzlich strenger stellen: `--header "X-Wikijs-Preset: readonly"`.
+- Scope: `-s local` (nur du, Default) · `-s user` (alle deine Projekte) · `-s project` (eingecheckte `.mcp.json` — **niemals** echten Handle/Key committen!).
+- Prüfen: `claude mcp list`, `claude mcp get wikijs`.
 
 ### Alternativ als JSON (`~/.claude.json` oder Projekt-`.mcp.json`)
 ```jsonc
@@ -32,10 +35,7 @@ Optional eine eigene, strengere Policy nur für dich:
     "wikijs": {
       "type": "http",
       "url": "https://<deploy>/mcp",
-      "headers": {
-        "X-Wikijs-Url": "https://dein-wiki.example.org",
-        "Authorization": "Bearer DEIN_WIKIJS_API_KEY"
-      }
+      "headers": { "X-Wikijs-Token": "wzp_DEIN_GEHEIMER_HANDLE" }
     }
   }
 }
@@ -43,35 +43,52 @@ Optional eine eigene, strengere Policy nur für dich:
 
 ---
 
-## 2. Claude Code Web / claude.ai-Connector — Muster C oder A
+## 2. Claude Code Web / claude.ai-Connector — via URL
 
-Die **Connector-Oberfläche** auf claude.ai (Web/Desktop) erlaubt aktuell **keine** Custom-Header — nur OAuth oder eine reine URL. Darum hier **Muster C (persönliche URL)** oder **Muster A (Single-Tenant)**.
+Die **Connector-Oberfläche** auf claude.ai (Web/Desktop) erlaubt **keine** Custom-Header — nur OAuth oder eine reine URL. Darum kommt der Handle in die **URL**.
 
-> Voraussetzung: Plan **Pro, Max, Team oder Enterprise** (bei Team/Enterprise nur durch Owner). Der Server muss öffentlich aus dem Internet erreichbar sein (Vercel ✓).
+> Voraussetzung: Plan **Pro, Max, Team oder Enterprise** (bei Team/Enterprise nur durch Owner). Der Server muss öffentlich erreichbar sein (Vercel ✓).
 
 **Schritte:**
-1. claude.ai öffnen → **Settings → Connectors → Add custom connector**.
+1. claude.ai → **Settings → Connectors → Add custom connector**.
 2. **Name**: z. B. `Wiki.js`.
-3. **Remote MCP server URL** eintragen:
-   - **Muster C (eigener Key pro User):**
+3. **Remote MCP server URL**:
+   - **Empfohlen (Profil-Handle):**
      ```
-     https://<deploy>/mcp?url=https://dein-wiki.example.org&token=DEIN_KEY_ODER_ALIAS
+     https://<deploy>/mcp?token=wzp_DEIN_GEHEIMER_HANDLE
      ```
-     Empfehlung: `token=` auf einen **Alias** setzen (echter Key serverseitig via `WIKIJS_KEY_MAP`), damit der echte Key nicht in der URL steht.
-   - **Muster A (Single-Tenant):** wenn der Deploy `WIKIJS_URL` + `WIKIJS_TOKEN` als Env gesetzt hat, genügt:
+   - **Direktes BYOK (ohne Profile):**
      ```
-     https://<deploy>/mcp
+     https://<deploy>/mcp?url=https://dein-wiki.example.org&token=DEIN_WIKIJS_API_KEY
      ```
-4. **Advanced settings** kannst du leer lassen (OAuth wird hier nicht gebraucht).
-5. **Add** klicken → im Chat über das Werkzeug-/Connector-Menü aktivieren.
+   - **Single-Tenant (Deploy hat `WIKIJS_URL`+`WIKIJS_TOKEN`):** einfach `https://<deploy>/mcp`.
+4. **Advanced settings** leer lassen (kein OAuth nötig).
+5. **Add** → im Chat über das Connector-Menü aktivieren.
 
-> Wenn du die Policy pro Nutzer verschärfen willst, hänge `&preset=readonly` (oder `editor`, …) an die URL.
+> Strenger stellen: `&preset=readonly` an die URL hängen.
 
 ---
 
-## 3. Claude Desktop — Muster B (lokal, stdio) ✅
+## 3. Cursor — via Header ✅
 
-Für den lokalen Betrieb am eigenen Rechner ist **stdio** am robustesten (kein Deploy nötig). Config-Datei:
+`.cursor/mcp.json` (im Projekt) oder global:
+```jsonc
+{
+  "mcpServers": {
+    "wikijs": {
+      "url": "https://<deploy>/mcp",
+      "headers": { "X-Wikijs-Token": "wzp_DEIN_GEHEIMER_HANDLE" }
+    }
+  }
+}
+```
+(Direktes BYOK: zusätzlich `"X-Wikijs-Url": "https://dein-wiki.example.org"` und den echten Key als Token.) Oder lokal per stdio analog zu Claude Desktop.
+
+---
+
+## 4. Claude Desktop — lokal via stdio ✅
+
+Single-User am eigenen Rechner (kein Deploy/Handle nötig). Config-Datei:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
@@ -94,25 +111,5 @@ Danach Claude Desktop neu starten. (Für einen **Remote**-Server in Claude Deskt
 
 ---
 
-## 4. Cursor — Muster B (Header) ✅
-
-`.cursor/mcp.json` (im Projekt) oder global:
-```jsonc
-{
-  "mcpServers": {
-    "wikijs": {
-      "url": "https://<deploy>/mcp",
-      "headers": {
-        "X-Wikijs-Url": "https://dein-wiki.example.org",
-        "X-Wikijs-Token": "DEIN_WIKIJS_API_KEY"
-      }
-    }
-  }
-}
-```
-Oder lokal per stdio analog zu Claude Desktop (`command`/`args`/`env`).
-
----
-
 ## Test
-Nach dem Einrichten in den Chat tippen: *„Liste die Tools des wikijs-Servers"* bzw. das Tool **`wiki_connection_status`** aufrufen lassen — es zeigt, ob Verbindung und Key stimmen.
+Im Chat das Tool **`wiki_connection_status`** aufrufen lassen → zeigt `connected`, `baseUrl`, `profile` (= dein Label) und ob ein Key gesetzt ist. `connected: true` = alles passt.

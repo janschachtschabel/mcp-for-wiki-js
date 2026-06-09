@@ -122,22 +122,24 @@ export class Policy {
     private readonly cats: Partial<CategoryMap>,
     private readonly tools: Record<string, PolicyMode>,
     readonly showBlocked: boolean,
-    private readonly overlay?: PolicyConfig,
+    private readonly overlays: readonly PolicyConfig[] = [],
   ) {}
 
-  /** Return a copy carrying an untrusted per-request overlay (can only tighten). */
+  /**
+   * Return a copy carrying an additional overlay. Overlays stack and can only ever
+   * TIGHTEN (a per-profile preset and a per-request preset both apply, strictest wins).
+   */
   withOverlay(overlay?: PolicyConfig): Policy {
     if (!overlay) return this;
-    return new Policy(this.base, this.cats, this.tools, this.showBlocked, overlay);
+    return new Policy(this.base, this.cats, this.tools, this.showBlocked, [...this.overlays, overlay]);
   }
 
   /** Resolve the effective mode for a tool in a given category. */
   resolve(toolName: string, category: Category): PolicyMode {
     let mode: PolicyMode = this.tools[toolName] ?? this.cats[category] ?? this.base[category];
-    if (this.overlay) {
-      const presetMap = this.overlay.preset ? PRESETS[this.overlay.preset] : undefined;
-      const ov =
-        this.overlay.tools?.[toolName] ?? this.overlay.categories?.[category] ?? presetMap?.[category];
+    for (const overlay of this.overlays) {
+      const presetMap = overlay.preset ? PRESETS[overlay.preset] : undefined;
+      const ov = overlay.tools?.[toolName] ?? overlay.categories?.[category] ?? presetMap?.[category];
       if (ov) mode = strictest(mode, ov);
     }
     return mode;

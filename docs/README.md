@@ -30,7 +30,7 @@ Pro Request: `X-Wikijs-Url` + (`Authorization: Bearer <key>` **oder** `X-Wikijs-
 ### C) URL-Parameter (Multi-Tenant) — für Header-lose Clients
 Persönliche Connector-URL: `https://<deploy>/mcp?url=<wiki>&token=<key-oder-alias>`. **Ein** Deploy, pro Nutzer eine eigene URL.
 - ✅ Clients: **claude.ai-Web-Connector, ChatGPT Developer Mode** (und alle anderen).
-- ⚠️ Der Key steht in der URL. **Empfehlung:** statt des echten Keys einen **Alias** verwenden und serverseitig per `WIKIJS_KEY_MAP` auf den echten Key mappen (siehe unten) — dann liegt der echte Key nie im Client/Log.
+- ⚠️ Steht ein **echter Key** in der URL, liegt er im Client/Log. **Empfehlung:** stattdessen einen geheimen **Profil-Handle** verwenden (`WIKIJS_PROFILES`, siehe **D** unten) — dann verlässt der echte Key den Server nie.
 
 | | Env (A) | Header (B) | URL-Param (C) |
 |---|---|---|---|
@@ -42,19 +42,26 @@ Persönliche Connector-URL: `https://<deploy>/mcp?url=<wiki>&token=<key-oder-ali
 ### Query-Parameter (Muster C) im Überblick
 | Parameter | Alias | Wirkung |
 |---|---|---|
-| `?token=` | `?key=` | Wiki.js-API-Key (oder Alias aus `WIKIJS_KEY_MAP`) |
+| `?token=` | `?key=` | Profil-Handle (`WIKIJS_PROFILES`, empfohlen), echter Wiki.js-API-Key, oder Legacy-Alias (`WIKIJS_KEY_MAP`) |
 | `?url=` | `?wiki=` | Basis-URL der Wiki.js-Instanz |
 | `?preset=` | – | Policy-Preset pro Nutzer (nur verschärfend), z. B. `readonly` |
 | `?policy=` | – | JSON-Policy-Override (URL-encodiert, nur verschärfend) |
 
 Echte Header haben Vorrang vor Query-Parametern.
 
-### Alias-Map (empfohlen für Muster C)
-Damit der echte Key nie in einer URL steht, beim Deploy setzen:
+### D) Profil-Map (EMPFOHLEN für Multi-User) — Key bleibt serverseitig
+Statt den echten Key zu übergeben, legst du Nutzer als **Profile in einer Env-Variable** an. Der **Map-Key ist ein geheimer, unerratbarer Handle**; der Nutzer sendet **nur den Handle** (als `?token=` bzw. `X-Wikijs-Token`), der echte Key verlässt den Server nie.
 ```bash
-WIKIJS_KEY_MAP={"alice":"<echter-key-alice>","bob":"<echter-key-bob>"}
+WIKIJS_PROFILES={"wzp_…SECRET-A":{"label":"Alice","url":"https://wiki.example.org","token":"<key-A>","preset":"readonly"},"wzp_…SECRET-B":{"label":"Bob","url":"https://wiki.example.org","token":"<key-B>","preset":"editor"}}
 ```
-Alice bekommt dann die URL `https://<deploy>/mcp?url=https://wiki.example.org&token=alice`.
+- **Handle erzeugen** (CSPRNG, lokal): `npm run gen:profile -- "Alice:readonly" "Bob:editor"`.
+- **Jeder Handle = eigener Key = eigene Rechte** (nie geteilt). Handle = Geheimnis (wie ein Passwort).
+- Funktioniert in **allen** Clients (URL `?token=<handle>` bzw. Header `X-Wikijs-Token: <handle>`).
+- **→ Volle Anleitung inkl. Handle-Generierung & Sicherheit: [Haupt-README › Profile & Handle](../README.md#mehrbenutzer-profile--handle-generierung).**
+
+> Der Map-Key ist das Geheimnis — **keine** Vornamen/erratbaren Werte verwenden, sonst greift das Rechtemanagement nicht. `label` ist der nicht-geheime Anzeigename.
+
+**Legacy/einfacher:** `WIKIJS_KEY_MAP={"<secret>":"<key>"}` (nur Handle→Token; URL/Policy aus Env/Headern). Von `WIKIJS_PROFILES` abgelöst.
 
 ---
 

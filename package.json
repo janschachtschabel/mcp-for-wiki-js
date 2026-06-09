@@ -11,7 +11,8 @@
     "stdio": "tsx bin/stdio.ts",
     "typecheck": "tsc --noEmit",
     "test:policy": "tsx scripts/test-policy.ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "gen:profile": "node scripts/gen-profile.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
