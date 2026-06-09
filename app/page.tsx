@@ -53,13 +53,14 @@ export default function Home() {
         <span style={mono}>{mcpUrl}</span>
       </p>
 
-      {/* ChatGPT & claude.ai web — URL parameters (no custom headers needed) */}
+      {/* ChatGPT & claude.ai web — URL parameter, profile handle */}
       <div style={card}>
         <h2 style={h2}>🔗 ChatGPT (Developer Mode) &amp; claude.ai (Web-Connector)</h2>
         <p style={{ ...muted, marginTop: 2 }}>
-          Diese Clients erlauben <strong>keine</strong> Custom-Header — gib deinen Key in der <strong>URL</strong> mit:
+          Diese Clients erlauben <strong>keine</strong> Custom-Header — dein Zugang kommt in die <strong>URL</strong>.
+          Empfohlen: dein <strong>geheimer Profil-Handle</strong> (der echte Wiki.js-Key bleibt serverseitig):
         </p>
-        <code style={code}>{`${mcpUrl}?url=https://dein-wiki.example.org&token=DEIN_WIKIJS_API_KEY`}</code>
+        <code style={code}>{`${mcpUrl}?token=wzp_DEIN_GEHEIMER_HANDLE`}</code>
         <ol style={ol}>
           <li>
             <strong>ChatGPT:</strong> Settings → Connectors → (Advanced → Developer mode) → <em>Create / Add custom
@@ -71,22 +72,26 @@ export default function Home() {
           </li>
         </ol>
         <p style={{ ...muted, fontSize: 13, marginBottom: 0 }}>
-          Optional nur lesen: <span style={mono}>&amp;preset=readonly</span> anhängen. Tipp: statt des echten Keys
-          einen Alias verwenden (Server-Env <span style={mono}>WIKIJS_KEY_MAP</span>), damit der Key nicht in der URL
-          steht.
+          Handles legt der Betreiber als <span style={mono}>WIKIJS_PROFILES</span> an (
+          <span style={mono}>npm run gen:profile</span>). Ohne Profile direktes BYOK:{' '}
+          <span style={mono}>?url=https://dein-wiki…&amp;token=DEIN_KEY</span>. Optional nur lesen:{' '}
+          <span style={mono}>&amp;preset=readonly</span>.
         </p>
       </div>
 
-      {/* Claude Code / Cursor — headers */}
+      {/* Claude Code / Cursor — headers, profile handle */}
       <div style={card}>
         <h2 style={h2}>💻 Claude Code (CLI) &amp; Cursor</h2>
-        <p style={{ ...muted, marginTop: 2 }}>Diese Clients unterstützen Header — der Key bleibt aus der URL heraus:</p>
+        <p style={{ ...muted, marginTop: 2 }}>
+          Diese Clients unterstützen Header — der Handle/Key bleibt aus der URL heraus:
+        </p>
         <code style={code}>{`claude mcp add --transport http wikijs ${mcpUrl} \\
-  --header "X-Wikijs-Url: https://dein-wiki.example.org" \\
-  --header "Authorization: Bearer DEIN_WIKIJS_API_KEY"`}</code>
+  --header "X-Wikijs-Token: wzp_DEIN_GEHEIMER_HANDLE"`}</code>
         <p style={{ ...muted, fontSize: 13, marginBottom: 0 }}>
-          Cursor: <span style={mono}>.cursor/mcp.json</span> mit <span style={mono}>url</span> +{' '}
-          <span style={mono}>headers</span> (siehe Repo-Doku <span style={mono}>docs/clients-claude.md</span>).
+          Ohne Profile (direktes BYOK): zusätzlich{' '}
+          <span style={mono}>--header &quot;X-Wikijs-Url: https://dein-wiki…&quot;</span> und den echten Key als Token.
+          Cursor: <span style={mono}>.cursor/mcp.json</span> mit <span style={mono}>headers</span> (siehe{' '}
+          <span style={mono}>docs/clients-claude.md</span>).
         </p>
       </div>
 

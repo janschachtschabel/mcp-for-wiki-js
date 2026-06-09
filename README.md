@@ -2,7 +2,7 @@
 
 Ein **MCP-Server für [Wiki.js](https://js.wiki/)** mit drei Zielen:
 
-1. **Möglichst vollständige Abdeckung der GraphQL-API** — 64 benannte Tools über alle Domänen (Pages, Tags, Assets, Users, Groups, Comments, Navigation, Auth/API-Keys, Site/System) **plus** ein `wiki_graphql`-Escape-Hatch für 100 % Abdeckung.
+1. **Möglichst vollständige Abdeckung der GraphQL-API** — **68 Tools** über alle Domänen (Pages, Tags, Assets, Users, Groups, Comments, Navigation, Auth/API-Keys, Site/System), inklusive eines `wiki_graphql`-Escape-Hatch für 100 % Abdeckung.
 2. **Feingranulare Rechtesteuerung** — pro Funktion/Kategorie: _erlaubt_ / _nur mit Genehmigung_ / _geblockt_.
 3. **Echter Mehrbenutzer-Betrieb** — jeder Nutzer mit eigenem API-Key/eigenen Rechten, **ohne** dass der echte Wiki.js-Key zum LLM-Anbieter (ChatGPT/Claude) gelangt.
 
