@@ -10,7 +10,11 @@ const PAGE_META_FIELDS =
 const DEFAULT_MAX_CONTENT = 100_000;
 
 function singleSelection(includeContent: boolean, includeRender: boolean): string {
-  return `${PAGE_META_FIELDS}${includeContent ? ' content editor' : ''}${includeRender ? ' render toc' : ''}`;
+  // NOTE: Page.toc is declared `String` in the Wiki.js schema, but the underlying column is
+  // JSON. On Postgres the driver returns a parsed array, so selecting `toc` makes GraphQL
+  // throw "String cannot represent value: [...]" and fails the whole query. We therefore
+  // request only `render` (the rendered HTML, which is reliable on every DB backend).
+  return `${PAGE_META_FIELDS}${includeContent ? ' content editor' : ''}${includeRender ? ' render' : ''}`;
 }
 
 const DELETE_PAGE = `mutation($id:Int!){ pages { delete(id:$id) { ${DEFAULT_RESPONSE} } } }`;
@@ -63,7 +67,7 @@ export const pageTools: ToolDef[] = [
       path: z.string().optional().describe('Page path, e.g. "docs/intro" (requires locale).'),
       locale: z.string().default('en').describe('Locale for path lookup. Default "en".'),
       metadataOnly: z.boolean().default(false).describe('If true, omit the page content/body.'),
-      includeRender: z.boolean().default(false).describe('If true, also return rendered HTML and TOC.'),
+      includeRender: z.boolean().default(false).describe('If true, also return the rendered HTML.'),
       maxContentChars: z
         .number()
         .int()

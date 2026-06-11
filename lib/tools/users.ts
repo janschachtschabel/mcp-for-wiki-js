@@ -1,9 +1,16 @@
 import { z } from 'zod';
-import { ok, assertOk } from '../wikijs/format';
+import { ok, fail, assertOk } from '../wikijs/format';
 import { DEFAULT_RESPONSE, type ToolDef } from './types';
 import type { WikiContext } from '../context';
 
 const USER_MINIMAL = 'id name email providerKey isSystem isActive createdAt lastLoginAt';
+
+// The Wiki.js users.search resolver only SELECTs id/email/name/providerKey/createdAt.
+// UserMinimal.isSystem and .isActive are Boolean! — requesting them on a search hit yields
+// "Cannot return null for non-nullable field UserMinimal.isSystem" and fails the whole query.
+// So search requests only what the resolver provides; use wiki_users_list / wiki_user_get
+// for the full record (those resolvers populate every field).
+const USER_SEARCH_FIELDS = 'id name email providerKey createdAt';
 
 /** Simple id-only mutations that return a DefaultResponse. */
 function userIdMutation(name: string, field: string, label: string, verb: string): ToolDef {
@@ -17,7 +24,9 @@ function userIdMutation(name: string, field: string, label: string, verb: string
         `mutation($id:Int!){ users { ${field}(id:$id){ ${DEFAULT_RESPONSE} } } }`,
         { id: a.id },
       );
-      assertOk(data.users[field].responseResult, `${label} user`);
+      // The mutation field can be null if Wiki.js returns no result (e.g. an unimplemented
+      // resolver) — read defensively so we surface a clean message, not a TypeError.
+      assertOk(data?.users?.[field]?.responseResult, `${label} user`);
       return ok({ id: a.id }, `✅ User ${verb}.`);
     },
   };
@@ -47,7 +56,7 @@ export const userTools: ToolDef[] = [
     inputSchema: { query: z.string().min(1) },
     handler: async (a, ctx) => {
       const data = await ctx.client.request(
-        `query($query:String!){ users { search(query:$query){ ${USER_MINIMAL} } } }`,
+        `query($query:String!){ users { search(query:$query){ ${USER_SEARCH_FIELDS} } } }`,
         { query: a.query },
       );
       return ok(data.users.search);
@@ -174,6 +183,31 @@ export const userTools: ToolDef[] = [
   userIdMutation('wiki_user_activate', 'activate', 'Activate', 'activated'),
   userIdMutation('wiki_user_deactivate', 'deactivate', 'Deactivate', 'deactivated'),
   userIdMutation('wiki_user_verify', 'verify', 'Verify', 'verified'),
-  userIdMutation('wiki_user_reset_password', 'resetPassword', 'Reset the password of', 'password reset'),
+  {
+    // Wiki.js 2.x ships users.resetPassword as a stub resolver that always returns `false`
+    // (no responseResult). We still issue the mutation (forward-compatible if a future
+    // version implements it) but detect the empty result and point to the working path.
+    name: 'wiki_user_reset_password',
+    description:
+      'Reset a user\'s password by id. NOTE: Wiki.js 2.x does not implement this server-side ' +
+      '(the resolver is a stub) — to actually set a password, use wiki_user_update with newPassword.',
+    category: 'manage_users',
+    inputSchema: { id: z.number().int() },
+    handler: async (a, ctx) => {
+      const data = await ctx.client.request(
+        `mutation($id:Int!){ users { resetPassword(id:$id){ ${DEFAULT_RESPONSE} } } }`,
+        { id: a.id },
+      );
+      const rr = data?.users?.resetPassword?.responseResult;
+      if (!rr) {
+        return fail(
+          'Wiki.js did not implement users.resetPassword (server returned no result). ' +
+            'To set a password, call wiki_user_update with the newPassword field.',
+        );
+      }
+      assertOk(rr, 'Reset password');
+      return ok({ id: a.id }, '✅ Password reset.');
+    },
+  },
   userIdMutation('wiki_user_disable_tfa', 'disableTFA', 'Disable 2FA for', '2FA disabled'),
 ];
