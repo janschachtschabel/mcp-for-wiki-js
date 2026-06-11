@@ -10,7 +10,9 @@
     "start": "next start",
     "stdio": "tsx bin/stdio.ts",
     "typecheck": "tsc --noEmit",
+    "test": "npm run test:policy && npm run test:nav",
     "test:policy": "tsx scripts/test-policy.ts",
+    "test:nav": "tsx scripts/test-navigation.ts",
     "smoke": "node scripts/smoke.mjs",
     "gen:profile": "node scripts/gen-profile.mjs",
     "roles": "tsx scripts/show-roles.ts"

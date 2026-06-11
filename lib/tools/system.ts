@@ -152,13 +152,25 @@ export const systemTools: ToolDef[] = [
   {
     name: 'wiki_graphql',
     description:
-      'Run an arbitrary Wiki.js GraphQL query or mutation. Use for any operation not covered by a dedicated tool. Powerful — gated under the manage_system category.',
+      'Run an arbitrary Wiki.js GraphQL query or mutation. Use for any operation not covered by a ' +
+      'dedicated tool. Powerful — gated under the manage_system category. Safety net: a raw MUTATION ' +
+      'returns a dry-run preview unless you pass confirm=true; plain queries run directly.',
     category: 'manage_system',
     inputSchema: {
       query: z.string().min(1).describe('GraphQL query or mutation document.'),
       variables: z.record(z.any()).optional().describe('Variables object for the query.'),
     },
     handler: async (a, ctx) => {
+      // The escape hatch can run ANY mutation (delete pages, wipe navigation, revoke API keys, …).
+      // Even when policy sets manage_system to "allow", never execute a raw mutation without an
+      // explicit confirm — return a dry-run preview first. Read queries are unaffected.
+      const isMutation = /(^|[\s{(])mutation\b/i.test(a.query);
+      if (isMutation && a.confirm !== true) {
+        return ok(
+          { dryRun: true, operation: 'mutation', query: a.query, variables: a.variables ?? {} },
+          '⚠️ Raw GraphQL MUTATION — DRY RUN, nothing executed. Review it, then call again with "confirm": true to run it.',
+        );
+      }
       const data = await ctx.client.request(a.query, a.variables ?? {});
       return ok(data);
     },
