@@ -72,10 +72,10 @@ export default function Home() {
           </li>
         </ol>
         <p style={{ ...muted, fontSize: 13, marginBottom: 0 }}>
-          Handles legt der Betreiber als <span style={mono}>WIKIJS_PROFILES</span> an (
-          <span style={mono}>npm run gen:profile</span>). Ohne Profile direktes BYOK:{' '}
-          <span style={mono}>?url=https://dein-wiki…&amp;token=DEIN_KEY</span>. Optional nur lesen:{' '}
-          <span style={mono}>&amp;preset=readonly</span>.
+          Der Betreiber legt Handles + Rollen in <span style={mono}>WIKIJS_PROFILES</span> an (
+          <span style={mono}>npm run gen:profile -- &quot;Name:rolle&quot;</span>); die Wiki-URL einmal global via{' '}
+          <span style={mono}>WIKIJS_URL</span>. Ohne Profile direktes BYOK:{' '}
+          <span style={mono}>?url=https://dein-wiki…&amp;token=DEIN_KEY</span>.
         </p>
       </div>
 
@@ -116,11 +116,13 @@ export default function Home() {
           </ul>
         </div>
         <div style={{ ...card, flex: '1 1 240px' }}>
-          <strong>Rechte (Policy)</strong>
+          <strong>Rechte (Rollen)</strong>
           <p style={{ ...muted, margin: '6px 0 0', fontSize: 13 }}>
-            Pro Kategorie <em>allow</em> / <em>confirm</em> (Dry-Run bis <span style={mono}>confirm:true</span>) /{' '}
-            <em>block</em>. Preset via <span style={mono}>WIKIJS_PERMISSION_PRESET</span>; pro Nutzer verschärfbar via{' '}
-            <span style={mono}>&amp;preset=</span> bzw. <span style={mono}>X-Wikijs-Preset</span>.
+            Pro Person eine <strong>Rolle</strong> (<span style={mono}>leser → systemadmin</span>), definiert in{' '}
+            <span style={mono}>config/roles.json</span>. Modi je Kategorie/Tool: <em>allow</em> / <em>confirm</em>{' '}
+            (Dry-Run bis <span style={mono}>confirm:true</span>) / <em>block</em>. Obergrenze via{' '}
+            <span style={mono}>WIKIJS_PERMISSION_PRESET</span>. Matrix: <span style={mono}>docs/roles.md</span> ·{' '}
+            <span style={mono}>npm run roles</span>.
           </p>
         </div>
       </div>

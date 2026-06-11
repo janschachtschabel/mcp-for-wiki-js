@@ -8,7 +8,8 @@ Ein MCP-Server für Wiki.js: volle GraphQL-API-Abdeckung, Mehrbenutzer-Betrieb m
 |---|---|
 | [Client-Einrichtung: Claude](./clients-claude.md) | **Claude Code (CLI & Web)**, claude.ai-Web-Connector, Claude Desktop, Cursor |
 | [Client-Einrichtung: ChatGPT](./clients-chatgpt.md) | **ChatGPT Developer Mode** (Custom MCP Connector) |
-| [Rechtesteuerung](./permissions.md) | Presets, `allow`/`confirm`/`block`, pro-User-Verschärfung |
+| [**Rollen & Rechte-Matrix**](./roles.md) | Tabelle aller Rollen × Rechte (leser → systemadmin), Klartext, eigene Rollen |
+| [Rechtesteuerung](./permissions.md) | Rollen, `allow`/`confirm`/`block`, Obergrenze, pro-User-Verschärfung |
 | [Ausbaustufe 1: Admin-Tools](./admin-extension.md) | Wofür die noch nicht als Einzel-Tool gebauten Admin-Funktionen sind (Theming, Storage, Mail, …) |
 
 ---
@@ -52,9 +53,10 @@ Echte Header haben Vorrang vor Query-Parametern.
 ### D) Profil-Map (EMPFOHLEN für Multi-User) — Key bleibt serverseitig
 Statt den echten Key zu übergeben, legst du Nutzer als **Profile in einer Env-Variable** an. Der **Map-Key ist ein geheimer, unerratbarer Handle**; der Nutzer sendet **nur den Handle** (als `?token=` bzw. `X-Wikijs-Token`), der echte Key verlässt den Server nie.
 ```bash
-WIKIJS_PROFILES={"wzp_…SECRET-A":{"label":"Alice","url":"https://wiki.example.org","token":"<key-A>","preset":"readonly"},"wzp_…SECRET-B":{"label":"Bob","url":"https://wiki.example.org","token":"<key-B>","preset":"editor"}}
+WIKIJS_URL=https://wiki.example.org   # einmal global
+WIKIJS_PROFILES={"wzp_…SECRET-A":{"label":"Alice","token":"<key-A>","role":"leser"},"wzp_…SECRET-B":{"label":"Bob","token":"<key-B>","role":"redakteur"}}
 ```
-- **Handle erzeugen** (CSPRNG, lokal): `npm run gen:profile -- "Alice:readonly" "Bob:editor"`.
+- **Handle + Rolle erzeugen** (CSPRNG, lokal): `npm run gen:profile -- "Alice:leser" "Bob:redakteur"` (Rollen aus `config/roles.json`).
 - **Jeder Handle = eigener Key = eigene Rechte** (nie geteilt). Handle = Geheimnis (wie ein Passwort).
 - Funktioniert in **allen** Clients (URL `?token=<handle>` bzw. Header `X-Wikijs-Token: <handle>`).
 - **→ Volle Anleitung inkl. Handle-Generierung & Sicherheit: [Haupt-README › Profile & Handle](../README.md#mehrbenutzer-profile--handle-generierung).**

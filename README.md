@@ -86,9 +86,10 @@ Im Mehrbenutzer-Modus liegen die echten Keys **als Env-Variable in Vercel** (Ver
 |---|---|---|---|
 | `WIKIJS_URL` | nur Single-Tenant¹ | – | Basis-URL der Wiki.js-Instanz, z. B. `https://wiki.example.org` (ohne `/graphql`) |
 | `WIKIJS_TOKEN` | nur Single-Tenant¹ | – | Wiki.js-API-Key (Bearer). **Secret.** (Alias: `WIKIJS_API_KEY`) |
-| `WIKIJS_PROFILES` | für Mehrbenutzer | – | JSON: geheimer Handle → `{ label, url, token, preset, policy }`. **Secret.** Siehe [unten](#mehrbenutzer-profile--handle-generierung) |
-| `WIKIJS_PERMISSION_PRESET` | nein | `safe` | Policy-Obergrenze: `readonly` · `safe` · `editor` · `maintainer` · `full` |
-| `WIKIJS_POLICY` | nein | – | JSON-Feinjustierung pro Kategorie/Tool (überschreibt das Preset) |
+| `WIKIJS_PROFILES` | für Mehrbenutzer | – | JSON: geheimer Handle → `{ label, token, role, url? }`. **Secret.** Siehe [unten](#mehrbenutzer-profile--handle-generierung) |
+| `WIKIJS_PERMISSION_PRESET` | nein | `safe` | **Globale Obergrenze** (Ceiling-Rolle) — sichtbare Tools + Maximum. Rollen in `config/roles.json` |
+| `WIKIJS_POLICY` | nein | – | JSON-Feinjustierung deploy-weit pro Kategorie/Tool |
+| `WIKIJS_ROLES` | nein | – | JSON, das die **Rollen-Definitionen** zur Laufzeit überschreibt (Form wie `config/roles.json`) |
 | `WIKIJS_SHOW_BLOCKED` | nein | `false` | geblockte Tools als deaktivierte Stubs in `tools/list` zeigen |
 | `WIKIJS_KEY_MAP` | nein | – | Legacy-Map Handle→Token (nur Token; URL/Policy aus Env). Von `WIKIJS_PROFILES` abgelöst |
 | `WIKIJS_TIMEOUT_MS` | nein | `30000` | Timeout pro GraphQL-Request (AbortController) |
@@ -118,38 +119,36 @@ vercel env add WIKIJS_PERMISSION_PRESET production
 ## Mehrbenutzer: Profile & Handle-Generierung
 
 ### Konzept
-Statt den echten Key an den Client/LLM zu geben, konfigurierst du Nutzer als **Profile** in der Env-Variable `WIKIJS_PROFILES`. Der **Map-Key jedes Profils ist ein geheimer, unerratbarer Handle-Token** — das ist das einzige, was der Nutzer/LLM zu sehen bekommt. Jeder Handle mappt serverseitig auf:
+Statt den echten Key an den Client/LLM zu geben, konfigurierst du Nutzer als **Profile** in `WIKIJS_PROFILES` und **weist jedem eine Rolle zu**. Der **Map-Key jedes Profils ist ein geheimer, unerratbarer Handle** — das einzige, was der Nutzer/LLM sieht. Die **Wiki-URL wird einmal global** über `WIKIJS_URL` gesetzt (in der Regel ein Wiki für alle):
 
 ```jsonc
 "<GEHEIMER-HANDLE>": {
-  "label":  "Alice",                      // nicht-geheimer Name (Audit/Anzeige)
-  "url":    "https://wiki.example.org",   // optional (Fallback: WIKIJS_URL)
-  "token":  "<echter Wiki.js-API-Key>",   // Secret — bleibt serverseitig
-  "preset": "readonly",                   // optional: Pro-Handle-Policy (nur verschärfend)
-  "policy": { "categories": {}, "tools": {} } // optional: Feinjustierung
+  "label": "Alice",                    // nicht-geheimer Name (Audit/Anzeige)
+  "token": "<echter Wiki.js-API-Key>", // Secret — bleibt serverseitig
+  "role":  "leser",                    // Rolle aus config/roles.json
+  "url":   "https://…"                 // OPTIONAL (selten; Default: WIKIJS_URL)
 }
 ```
 
-- **Jeder Handle = eigener Key = eigene Rechte.** Verschiedene Keys laufen **nie** über denselben Handle.
-- Der `label` (Name) wird in `wiki_connection_status` angezeigt; **der geheime Handle wird nie zurückgegeben**.
-- Echte Wiki.js-Rechte kommen aus dem jeweiligen Key; das `preset` ist eine zusätzliche MCP-Schranke (kann nur **verschärfen**, Obergrenze = globales `WIKIJS_PERMISSION_PRESET`).
+- **Jeder Handle = eigener Key + eigene Rolle.** Verschiedene Keys laufen **nie** über denselben Handle.
+- `label` wird in `wiki_connection_status` angezeigt; **der geheime Handle wird nie zurückgegeben**.
+- Echte Rechte = Wiki.js-Key **und** Rolle (MCP-Schranke). Die Rolle reicht maximal bis zur globalen Obergrenze `WIKIJS_PERMISSION_PRESET` — siehe [Rollen](#rechtesteuerung-rollen).
 
 > ⚠️ **Der Handle IST das Geheimnis.** Wäre er erratbar (z. B. ein Vorname), könnte ein Nutzer den Handle eines anderen verwenden und dessen Rechte erben → Rechtemanagement ausgehebelt. **Immer hochentropische Zufalls-Handles** verwenden — kein Tool außer einem **CSPRNG** ist nötig (kein Online-Generator!).
 
 ### Handles erzeugen
-**Empfohlen — der mitgelieferte Generator** (gibt direkt die fertige Env-Zeile aus):
+**Empfohlen — der mitgelieferte Generator** (`label:role`, gibt die fertige Env-Zeile aus):
 ```bash
-npm run gen:profile -- "Alice:readonly" "Bob:editor"
+npm run gen:profile -- "Alice:leser" "Bob:redakteur"
 ```
 Ausgabe (Beispiel):
 ```text
-WIKIJS_PROFILES={"wzp_EiQoc-kMm8mkaUj1ImsBj7FIJ7Nym-PZ":{"label":"Alice","url":"https://wiki.example.org","token":"REPLACE_WITH_ALICE_WIKIJS_API_KEY","preset":"readonly"},"wzp_dFRiS6bri5-8im2_BVYwXSCi8h4sIjE0":{"label":"Bob","url":"https://wiki.example.org","token":"REPLACE_WITH_BOB_WIKIJS_API_KEY","preset":"editor"}}
+WIKIJS_PROFILES={"wzp_…A":{"label":"Alice","token":"REPLACE_WITH_ALICE_WIKIJS_API_KEY","role":"leser"},"wzp_…B":{"label":"Bob","token":"REPLACE_WITH_BOB_WIKIJS_API_KEY","role":"redakteur"}}
 
 # Jedem Nutzer seinen geheimen Handle aushändigen (wie ein Passwort):
-#   Alice [readonly] → wzp_EiQoc-kMm8mkaUj1ImsBj7FIJ7Nym-PZ
-#   Bob   [editor]   → wzp_dFRiS6bri5-8im2_BVYwXSCi8h4sIjE0
+#   Alice [role: leser]     → wzp_…A
+#   Bob   [role: redakteur] → wzp_…B
 ```
-> URL für alle gleich? `WIKI_URL=https://wiki.example.org npm run gen:profile -- "Alice:readonly" "Bob:editor"`
 
 **Alternativen (alle lokal, CSPRNG):**
 ```bash
@@ -259,9 +258,9 @@ Im Client das Tool **`wiki_connection_status`** aufrufen lassen → zeigt `conne
 
 ---
 
-## Rechtesteuerung (Permission Policy)
+## Rechtesteuerung (Rollen)
 
-Jedes Tool hat eine **Kategorie**; die Policy bildet jede Kategorie (und optional jedes Tool) auf einen **Modus** ab:
+Jedes Tool hat eine **Kategorie**; eine **Rolle** bildet jede Kategorie (und optional jedes Tool) auf einen **Modus** ab:
 
 | Modus | Verhalten |
 |---|---|
@@ -271,21 +270,29 @@ Jedes Tool hat eine **Kategorie**; die Policy bildet jede Kategorie (und optiona
 
 **Kategorien:** `read`, `write`, `delete`, `manage_users`, `manage_groups`, `manage_system`, `manage_auth`.
 
-### Presets (`WIKIJS_PERMISSION_PRESET`)
-| Preset | read | write | delete | users | groups | system | auth |
-|---|---|---|---|---|---|---|---|
-| `readonly` | allow | block | block | block | block | block | block |
-| `safe` *(Default)* | allow | confirm | confirm | block | block | block | block |
-| `editor` | allow | allow | confirm | block | block | block | block |
-| `maintainer` | allow | allow | confirm | confirm | confirm | confirm | confirm |
-| `full` | allow | allow | allow | allow | allow | allow | allow |
+### Rollen-Leiter (`config/roles.json`)
+Rollen sind in [`config/roles.json`](./config/roles.json) definiert — frei editierbar, mit `extends` (Vererbung) und **per-Tool**-Overrides. Default-Leiter:
 
-### Feinjustierung & Verschärfung
-- **Deploy-weit** (`WIKIJS_POLICY`, JSON): `{"categories":{"delete":"allow"},"tools":{"wiki_graphql":"block"}}`
-- **Pro Profil** (`preset`/`policy` im `WIKIJS_PROFILES`-Eintrag) — nur verschärfend.
-- **Pro Request** (Client): Header `X-Wikijs-Preset` / `X-Wikijs-Policy` bzw. URL `&preset=` / `&policy=` — nur verschärfend.
+| Rolle | read | write | delete | users | groups | system | auth | Hinweis |
+|---|---|---|---|---|---|---|---|---|
+| `leser` | allow | block | block | block | block | block | block | nur lesen |
+| `kommentator` | allow | block | block | block | block | block | block | + nur Kommentare schreiben (per-Tool) |
+| `autor` | allow | allow | block | block | block | block | block | schreiben, nicht löschen |
+| `redakteur` | allow | allow | confirm | block | block | block | block | = `editor` |
+| `moderator` | allow | allow | confirm | confirm | block | block | block | + Nutzer moderieren |
+| `betreuer` | allow | allow | confirm | block | block | confirm | block | + Wartung (Cache/Tree) |
+| `admin` | allow | allow | confirm | confirm | confirm | confirm | block | + Nutzer/Gruppen |
+| `systemadmin` | allow | allow | allow | allow | allow | allow | allow | = `full` |
 
-> **Sicherheitsmodell:** Overlays (Profil & Request) können nur **verschärfen**. Was das globale Preset/`WIKIJS_POLICY` blockt, kann niemand per Profil oder Header freischalten. Die **Sichtbarkeit** in `tools/list` bestimmt das globale Preset.
+(Plus Kompat-Aliase `readonly`/`safe`/`editor`/`maintainer`/`full`.) Effektive Rollen anzeigen: **`npm run roles`**. **Vollständige Matrix + Klartext-Beschreibung: [docs/roles.md](./docs/roles.md).**
+Eigene Rolle anlegen: Eintrag in `config/roles.json` (oder `extends` einer bestehenden) → Vercel **Redeploy**, bzw. ohne Rebuild per Env `WIKIJS_ROLES` (gleiches JSON).
+
+### Obergrenze, Zuweisung & Verschärfung
+- **Globale Obergrenze** (`WIKIJS_PERMISSION_PRESET`): die **maximale** Capability + der **sichtbare** Tool-Satz. Auf deine **höchste** verwendete Rolle setzen.
+- **Pro Person** (`role` im `WIKIJS_PROFILES`-Eintrag): die zugewiesene Rolle — wirkt **innerhalb** der Obergrenze.
+- **Pro Request** (Client): Header `X-Wikijs-Preset` / `X-Wikijs-Policy` bzw. URL `&preset=` / `&policy=` — nur **verschärfend**.
+
+> **Sicherheitsmodell:** Rolle & Request-Overlay können nur **bis zur Obergrenze** reichen und nur **verschärfen**. Die **Sichtbarkeit** in `tools/list` bestimmt die Obergrenze (mcp-handler registriert global). Echte Rechte = Schnittmenge aus Wiki.js-Key und Rolle.
 
 ---
 
@@ -326,7 +333,8 @@ lib/
   wikijs/client.ts fetch-basierter GraphQL-Client (Timeout, ohne Extra-Dependency)
   wikijs/format.ts Ergebnis-/Fehler-Helfer, responseResult-Prüfung, Truncation
   tools/*.ts       Tool-Definitionen je Domäne (deklarativ: Name, Kategorie, Zod-Schema, Handler)
-scripts/           gen-profile.mjs (Handle-Generator) · smoke*.mjs · test-policy.ts
+config/roles.json    Rollen-Definitionen (editierbar; extends + per-Tool; Built-ins als Fallback)
+scripts/           gen-profile.mjs (Handle-Generator) · show-roles.ts · smoke*.mjs · test-policy.ts
 ```
 
 **Stack:** Next.js (App Router) · `mcp-handler` · `@modelcontextprotocol/sdk` · `zod`. Stateless → Vercel-nativ.
@@ -365,7 +373,7 @@ node scripts/probe-deploy.mjs   <url>   # Deploy ohne Creds prüfen (Env-Status)
 
 ## Weitere Doku
 
-- [docs/clients-claude.md](./docs/clients-claude.md) · [docs/clients-chatgpt.md](./docs/clients-chatgpt.md) · [docs/permissions.md](./docs/permissions.md) · [docs/admin-extension.md](./docs/admin-extension.md)
+- [docs/roles.md](./docs/roles.md) (Rollen × Rechte-Matrix) · [docs/clients-claude.md](./docs/clients-claude.md) · [docs/clients-chatgpt.md](./docs/clients-chatgpt.md) · [docs/permissions.md](./docs/permissions.md) · [docs/admin-extension.md](./docs/admin-extension.md)
 
 ## Lizenz
 MIT

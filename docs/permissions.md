@@ -16,33 +16,43 @@ Jedes Tool gehört zu einer **Kategorie**. Die Policy bildet jede Kategorie (und
 
 > Strenge-Reihenfolge: `block` > `confirm` > `allow`. Effektiver Modus = strengster aus (Baseline, Overlay).
 
-## Presets (`WIKIJS_PERMISSION_PRESET`)
+## Rollen-Leiter (`config/roles.json`)
+Rollen sind in [`config/roles.json`](../config/roles.json) definiert — editierbar, mit `extends` (Vererbung) und **per-Tool**-Overrides.
 
-| Preset | read | write | delete | users | groups | system | auth |
+| Rolle | read | write | delete | users | groups | system | auth |
 |---|---|---|---|---|---|---|---|
-| `readonly` | allow | block | block | block | block | block | block |
-| `safe` *(Default)* | allow | confirm | confirm | block | block | block | block |
-| `editor` | allow | allow | confirm | block | block | block | block |
-| `maintainer` | allow | allow | confirm | confirm | confirm | confirm | confirm |
-| `full` | allow | allow | allow | allow | allow | allow | allow |
+| `leser` | allow | block | block | block | block | block | block |
+| `kommentator`¹ | allow | block | block | block | block | block | block |
+| `autor` | allow | allow | block | block | block | block | block |
+| `redakteur` (=`editor`) | allow | allow | confirm | block | block | block | block |
+| `moderator` | allow | allow | confirm | confirm | block | block | block |
+| `betreuer` | allow | allow | confirm | block | block | confirm | block |
+| `admin` | allow | allow | confirm | confirm | confirm | confirm | block |
+| `systemadmin` (=`full`) | allow | allow | allow | allow | allow | allow | allow |
 
-## Feinjustierung per Env (`WIKIJS_POLICY`, JSON)
-Überschreibt das Preset pro Kategorie und/oder pro Tool:
-```bash
-WIKIJS_POLICY={"categories":{"delete":"allow","manage_users":"block"},"tools":{"wiki_graphql":"block"}}
+¹ `kommentator` = `leser` **+ per-Tool** `wiki_comment_create`/`wiki_comment_update` = allow. Aliase: `readonly`→leser, `editor`→redakteur, `maintainer`→betreuer, `full`→systemadmin. Anzeigen: **`npm run roles`**.
+
+### Eigene Rolle / Anpassen
+```jsonc
+{
+  "defaultRole": "safe",
+  "roles": {
+    "lektor":    { "extends": "leser",     "tools": { "wiki_page_update": "confirm" } },
+    "redaktion": { "extends": "redakteur", "categories": { "manage_system": "confirm" } }
+  }
+}
 ```
+- Modi je Kategorie/Tool: `allow` / `confirm` / `block`. `extends` erbt; Teil-Definitionen überschreiben **nur** das Genannte.
+- **Vercel:** Datei ändern → **Redeploy** (beim Build gebündelt). Ohne Rebuild: Env `WIKIJS_ROLES` (gleiches JSON).
 
-## Pro-Request verschärfen
-- **Header** (Claude Code/Desktop/Cursor): `X-Wikijs-Preset: readonly` und/oder `X-Wikijs-Policy: {"categories":{"write":"confirm"}}`
-- **URL** (claude.ai-Web/ChatGPT): `…/mcp?...&preset=readonly` und/oder `&policy=<url-encodiertes-JSON>`
+## Zuweisung & Obergrenze
+- **Pro Person:** `"role": "<name>"` im `WIKIJS_PROFILES`-Eintrag.
+- **Globale Obergrenze** (`WIKIJS_PERMISSION_PRESET`): das **Maximum** + der **sichtbare** Tool-Satz. Auf die **höchste** verwendete Rolle setzen — Rollen wirken nur **innerhalb** davon.
+- **Deploy-weit feinjustieren** (`WIKIJS_POLICY`): `{"categories":{"delete":"allow"},"tools":{"wiki_graphql":"block"}}`.
+- **Pro Request verschärfen:** Header `X-Wikijs-Preset`/`X-Wikijs-Policy` bzw. URL `&preset=`/`&policy=` — nur **strenger**.
 
-## Beispiel-Setups
-| Ziel | Env |
-|---|---|
-| Nur lesen | `WIKIJS_PERMISSION_PRESET=readonly` |
-| Redaktion (lesen+schreiben, löschen mit Rückfrage) | `WIKIJS_PERMISSION_PRESET=editor` |
-| Voll-Admin, aber alles Heikle mit Rückfrage | `WIKIJS_PERMISSION_PRESET=maintainer` |
-| Vertrauen auf die Key-Rechte in Wiki.js | `WIKIJS_PERMISSION_PRESET=full` |
+> Reihenfolge: `block` > `confirm` > `allow`. Effektiv = strengster aus (Obergrenze, Rolle, Request). Echte Rechte = Schnittmenge aus Wiki.js-Key und Rolle.
 
 ## Testen
-`npm run test:policy` prüft die Auflösungslogik (Presets, Per-Tool-Override, „tighten-only") ohne Netzwerk.
+- `npm run test:policy` — Auflösungslogik (Rollen, Ceiling-Cap, per-Tool, „tighten-only") ohne Netzwerk.
+- `npm run roles` — effektive Rollen anzeigen.

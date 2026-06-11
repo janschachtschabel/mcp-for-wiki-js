@@ -3,7 +3,7 @@
  * Run: npm run test:policy
  */
 import assert from 'node:assert';
-import { basePolicyFromEnv, parsePolicyConfig } from '../lib/permissions';
+import { basePolicyFromEnv, parsePolicyConfig, roleConfig } from '../lib/permissions';
 
 let passed = 0;
 function check(label: string, fn: () => void) {
@@ -46,5 +46,33 @@ check('parse: drops bogus category + invalid mode', () => {
   const cfg = parsePolicyConfig(JSON.stringify({ categories: { bogus: 'allow', delete: 'weird', write: 'block' } }));
   assert.deepEqual(cfg?.categories, { write: 'block' });
 });
+
+// 6. ROLES assigned per person (applied as a tighten-only overlay on the ceiling)
+const editor = basePolicyFromEnv({ WIKIJS_PERMISSION_PRESET: 'editor' });
+check('role leser on editor ceiling: write -> block', () =>
+  assert.equal(editor.withOverlay(roleConfig('leser')).resolve('wiki_page_create', 'write'), 'block'));
+check('role leser: read stays allow', () =>
+  assert.equal(editor.withOverlay(roleConfig('leser')).resolve('wiki_pages_search', 'read'), 'allow'));
+
+const kommentator = editor.withOverlay(roleConfig('kommentator'));
+check('role kommentator: comment_create ALLOWED (per-tool)', () =>
+  assert.equal(kommentator.resolve('wiki_comment_create', 'write'), 'allow'));
+check('role kommentator: page_create BLOCKED (write category)', () =>
+  assert.equal(kommentator.resolve('wiki_page_create', 'write'), 'block'));
+
+const redakteur = editor.withOverlay(roleConfig('redakteur'));
+check('role redakteur: write allowed', () => assert.equal(redakteur.resolve('wiki_page_create', 'write'), 'allow'));
+check('role redakteur: delete confirm', () => assert.equal(redakteur.resolve('wiki_page_delete', 'delete'), 'confirm'));
+
+// 7. the global ceiling caps a high role
+const cappedAdmin = safe.withOverlay(roleConfig('systemadmin'));
+check('ceiling "safe" caps systemadmin: write -> confirm (not allow)', () =>
+  assert.equal(cappedAdmin.resolve('wiki_page_create', 'write'), 'confirm'));
+check('ceiling "safe" caps systemadmin: manage_users -> block', () =>
+  assert.equal(cappedAdmin.resolve('wiki_user_create', 'manage_users'), 'block'));
+
+// 8. unknown role name -> no-op overlay (effective = ceiling)
+check('unknown role name -> no-op', () =>
+  assert.equal(editor.withOverlay(roleConfig('does-not-exist')).resolve('wiki_page_create', 'write'), 'allow'));
 
 console.log(`\n${passed} policy assertions passed.`);

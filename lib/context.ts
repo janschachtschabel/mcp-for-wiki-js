@@ -1,5 +1,5 @@
 import { WikiClient } from './wikijs/client';
-import { Policy, basePolicyFromEnv, parsePolicyConfig, type PolicyConfig } from './permissions';
+import { Policy, basePolicyFromEnv, parsePolicyConfig, roleConfig, type PolicyConfig } from './permissions';
 
 /**
  * Per-request execution context: which Wiki.js instance + key to talk to, and the
@@ -35,9 +35,14 @@ export interface ToolExtra {
 interface Profile {
   /** Non-secret human label for audit/logs (the map KEY is the secret handle token). */
   label?: string;
+  /** Optional per-profile instance URL (defaults to the global WIKIJS_URL — usually one wiki for all). */
   url?: string;
   token: string;
+  /** Assigned rights role (name from config/roles.json). */
+  role?: string;
+  /** Legacy alias for `role`. */
   preset?: string;
+  /** Optional inline fine-tuning on top of the role. */
   policy?: { categories?: unknown; tools?: unknown };
 }
 
@@ -104,7 +109,8 @@ export function resolveContext(extra?: ToolExtra): WikiContext {
 
   let baseUrl: string;
   let realToken: string | undefined;
-  let profileOverlay: PolicyConfig | undefined;
+  let roleOverlay: PolicyConfig | undefined;
+  let inlineOverlay: PolicyConfig | undefined;
   let profileName: string | undefined;
 
   const profile = resolveProfile(token, env);
@@ -113,13 +119,12 @@ export function resolveContext(extra?: ToolExtra): WikiContext {
     // Expose only the non-secret label — never echo the secret alias back anywhere.
     profileName = profile.label ?? '(unlabeled)';
     realToken = profile.token;
+    // URL is usually global (one wiki for all); profile.url is an optional override.
     baseUrl = (profile.url || env.WIKIJS_URL || env.WIKIJS_BASE_URL || '').trim();
-    if (profile.preset || profile.policy) {
-      profileOverlay = parsePolicyConfig({
-        preset: profile.preset,
-        categories: profile.policy?.categories,
-        tools: profile.policy?.tools,
-      });
+    // Assigned role (from config/roles.json) + optional inline fine-tuning.
+    roleOverlay = roleConfig(profile.role ?? profile.preset);
+    if (profile.policy) {
+      inlineOverlay = parsePolicyConfig({ categories: profile.policy.categories, tools: profile.policy.tools });
     }
   } else {
     realToken = resolveAlias(token, env);
@@ -138,8 +143,8 @@ export function resolveContext(extra?: ToolExtra): WikiContext {
     );
   }
 
-  // Layer overlays: profile (operator) first, then request (client). Both only tighten.
-  const policy = BASE_POLICY.withOverlay(profileOverlay).withOverlay(requestOverlay);
+  // Layer overlays (all tighten): assigned role → inline fine-tuning → per-request.
+  const policy = BASE_POLICY.withOverlay(roleOverlay).withOverlay(inlineOverlay).withOverlay(requestOverlay);
 
   return {
     client: new WikiClient(baseUrl, realToken),

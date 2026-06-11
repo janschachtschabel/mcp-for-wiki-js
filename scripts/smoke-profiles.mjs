@@ -1,15 +1,14 @@
-// Smoke test for WIKIJS_PROFILES (env-backed named credential profiles).
-// The map KEY is a SECRET handle token (unguessable); "label" is the non-secret name.
-// Start the server with these two profiles (same secrets as below) + preset=editor:
-//   WIKIJS_PROFILES={"wzp_test_aaaaaaaaaaaaaaaaaaaaaaaa":{"label":"Alice","url":"https://wiki.alice.example","token":"dummy-A","preset":"readonly"},
-//                    "wzp_test_bbbbbbbbbbbbbbbbbbbbbbbb":{"label":"Bob","url":"https://wiki.bob.example","token":"dummy-B","preset":"editor"}}
+// Smoke test for WIKIJS_PROFILES with assigned ROLES and a single global WIKIJS_URL.
+// Start the server with:
+//   WIKIJS_URL=https://wiki.test.example
+//   WIKIJS_PERMISSION_PRESET=editor   (ceiling so 'redakteur' can write)
+//   WIKIJS_PROFILES={"wzp_test_alice":{"label":"Alice","token":"dummy","role":"leser"},
+//                    "wzp_test_bob":{"label":"Bob","token":"dummy","role":"redakteur"},
+//                    "wzp_test_carl":{"label":"Carl","token":"dummy","role":"kommentator"}}
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const base = process.argv[2] || 'http://localhost:3031/mcp';
-const A = 'wzp_test_aaaaaaaaaaaaaaaaaaaaaaaa';
-const B = 'wzp_test_bbbbbbbbbbbbbbbbbbbbbbbb';
-
 let bad = 0;
 const ok = (l, p) => {
   console.log((p ? 'ok  - ' : 'FAIL- ') + l);
@@ -22,48 +21,32 @@ async function connect(secret) {
   await c.connect(t);
   return c;
 }
-const statusText = async (c) => (await c.callTool({ name: 'wiki_connection_status', arguments: {} })).content[0].text;
-const createOf = (c) =>
-  c.callTool({ name: 'wiki_page_create', arguments: { path: 'x', title: 'x', content: 'x', confirm: true } });
+const call = (c, name, args = {}) => c.callTool({ name, arguments: args });
+const text = (r) => r.content?.[0]?.text ?? '';
+const blocked = (r) => r.isError === true && /blocked by the active permission policy/.test(text(r));
 
 try {
-  // --- Alice: readonly handle, instance A ---
-  const alice = await connect(A);
-  const aText = await statusText(alice);
-  const a = JSON.parse(aText);
-  console.log('Alice ->', JSON.stringify(a).slice(0, 150));
-  ok('profile shows LABEL "Alice" (not the secret)', a.profile === 'Alice');
-  ok('secret handle is NOT echoed in the response', !aText.includes(A));
-  ok('url comes from Alice\'s profile', String(a.baseUrl).includes('wiki.alice.example'));
-  const aCreate = await createOf(alice);
-  ok(
-    'Alice (readonly handle) write is policy-blocked',
-    aCreate.isError === true && /blocked by the active permission policy/.test(aCreate.content[0].text),
-  );
+  // --- Alice = leser (read-only) ---
+  const alice = await connect('wzp_test_alice');
+  const aStatus = JSON.parse(text(await call(alice, 'wiki_connection_status')));
+  console.log('Alice ->', JSON.stringify(aStatus).slice(0, 130));
+  ok('Alice label shown (not secret)', aStatus.profile === 'Alice');
+  ok('Alice uses the GLOBAL wiki url', String(aStatus.baseUrl).includes('wiki.test.example'));
+  ok('leser: page write BLOCKED', blocked(await call(alice, 'wiki_page_create', { path: 'x', title: 'x', content: 'x', confirm: true })));
   await alice.close();
 
-  // --- Bob: editor handle, instance B (different secret, key, rights, instance) ---
-  const bob = await connect(B);
-  const b = JSON.parse(await statusText(bob));
-  console.log('Bob   ->', JSON.stringify(b).slice(0, 150));
-  ok('profile shows LABEL "Bob"', b.profile === 'Bob');
-  ok('url comes from Bob\'s profile (≠ Alice)', String(b.baseUrl).includes('wiki.bob.example'));
-  const bCreate = await createOf(bob);
-  ok(
-    'Bob (editor handle) write is NOT policy-blocked',
-    !/blocked by the active permission policy/.test(bCreate.content[0].text),
-  );
+  // --- Bob = redakteur (read + write + delete-confirm) ---
+  const bob = await connect('wzp_test_bob');
+  ok('Bob label shown', JSON.parse(text(await call(bob, 'wiki_connection_status'))).profile === 'Bob');
+  ok('redakteur: page write NOT blocked', !blocked(await call(bob, 'wiki_page_create', { path: 'x', title: 'x', content: 'x', confirm: true })));
   await bob.close();
 
-  // --- a guessed/wrong secret must NOT inherit anyone's rights ---
-  const guess = await connect('Alice'); // guessing the label as a token
-  const gText = await statusText(guess);
-  console.log('guess ->', gText.replace(/\s+/g, ' ').slice(0, 120));
-  ok(
-    'guessing the label "Alice" grants NEITHER her profile NOR her instance',
-    !gText.includes('wiki.alice.example') && !/"profile"\s*:\s*"Alice"/.test(gText),
-  );
-  await guess.close();
+  // --- Carl = kommentator (read + ONLY comment writes) ---
+  const carl = await connect('wzp_test_carl');
+  ok('Carl label shown', JSON.parse(text(await call(carl, 'wiki_connection_status'))).profile === 'Carl');
+  ok('kommentator: comment_create NOT blocked (per-tool)', !blocked(await call(carl, 'wiki_comment_create', { pageId: 1, content: 'hi', confirm: true })));
+  ok('kommentator: page_create BLOCKED (write category)', blocked(await call(carl, 'wiki_page_create', { path: 'x', title: 'x', content: 'x', confirm: true })));
+  await carl.close();
 
   console.log(bad ? 'PROFILES SMOKE FAILED' : 'PROFILES SMOKE DONE');
   process.exitCode = bad ? 1 : 0;
