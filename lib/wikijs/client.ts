@@ -23,6 +23,14 @@ export interface GraphQLErrorEntry {
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.WIKIJS_TIMEOUT_MS) || 30_000;
 const MAX_CONCURRENCY = Math.max(1, Number(process.env.WIKIJS_MAX_CONCURRENCY) || 8);
+const MAX_RETRIES = Math.max(0, Number(process.env.WIKIJS_RETRIES) || 2);
+
+/** Thrown when a request never reached Wiki.js (DNS/TCP/TLS). Safe to retry — even mutations, since nothing ran. */
+export class WikiConnectionError extends Error {}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Exponential backoff with jitter, capped at 2s. */
+const backoffMs = (attempt: number) => Math.min(2000, 150 * 2 ** attempt) + Math.floor(Math.random() * 120);
 
 /**
  * Async counting semaphore: caps concurrent work at `max`, queues the rest FIFO, and
@@ -106,9 +114,25 @@ export class WikiClient {
     return `${this.baseUrl}/graphql`;
   }
 
-  /** Run a GraphQL request through the concurrency gate (overload protection). */
+  /** Run a GraphQL request through the concurrency gate, with retry on connection failures. */
   async request<T = any>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-    return upstreamGate.run(() => this.send<T>(query, variables), this.timeoutMs);
+    return upstreamGate.run(() => this.sendWithRetry<T>(query, variables), this.timeoutMs);
+  }
+
+  private async sendWithRetry<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.send<T>(query, variables);
+      } catch (err) {
+        // Retry ONLY on connection-level failures (request never reached the server → safe even
+        // for mutations). Never on timeouts / GraphQL errors / HTTP status.
+        if (attempt < MAX_RETRIES && err instanceof WikiConnectionError) {
+          await sleep(backoffMs(attempt));
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   private async send<T = any>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -131,7 +155,7 @@ export class WikiClient {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new Error(`Wiki.js request timed out after ${this.timeoutMs} ms (${this.endpoint}).`);
       }
-      throw new Error(
+      throw new WikiConnectionError(
         `Could not reach Wiki.js at ${this.endpoint}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
@@ -159,5 +183,50 @@ export class WikiClient {
       throw new Error('Wiki.js GraphQL response contained no data.');
     }
     return body.data;
+  }
+
+  /** Upload a file via Wiki.js' multipart REST endpoint (/u). Returns {succeeded, message}. */
+  async upload(opts: {
+    filename: string;
+    data: Uint8Array;
+    mime?: string;
+    folderId?: number;
+  }): Promise<{ succeeded: boolean; message?: string }> {
+    return upstreamGate.run(async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const form = new FormData();
+        // Wiki.js' /u route reads the folder metadata AND the file from the SAME field name.
+        form.append('mediaUpload', JSON.stringify({ folderId: opts.folderId ?? null }));
+        // Cast: newer @types/node make Uint8Array generic over ArrayBufferLike, which TS won't
+        // narrow to BlobPart's ArrayBufferView<ArrayBuffer>. Runtime is fine.
+        const part = opts.data as unknown as BlobPart;
+        form.append('mediaUpload', new Blob([part], { type: opts.mime || 'application/octet-stream' }), opts.filename);
+        const res = await fetch(`${this.baseUrl}/u`, {
+          method: 'POST',
+          headers: { ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) },
+          body: form,
+          signal: controller.signal,
+        });
+        const text = (await res.text()).trim();
+        if (res.ok && text === 'ok') return { succeeded: true };
+        try {
+          const j = JSON.parse(text) as { succeeded?: boolean; message?: string };
+          return { succeeded: Boolean(j.succeeded), message: j.message };
+        } catch {
+          return { succeeded: res.ok, message: res.ok ? undefined : `HTTP ${res.status}: ${text.slice(0, 200)}` };
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error(`Wiki.js upload timed out after ${this.timeoutMs} ms.`);
+        }
+        throw new WikiConnectionError(
+          `Could not reach Wiki.js at ${this.baseUrl}/u: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    }, this.timeoutMs);
   }
 }

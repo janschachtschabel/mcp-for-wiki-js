@@ -2,7 +2,7 @@
 
 Ein **MCP-Server für [Wiki.js](https://js.wiki/)** mit drei Zielen:
 
-1. **Möglichst vollständige Abdeckung der GraphQL-API** — **68 Tools** über alle Domänen (Pages, Tags, Assets, Users, Groups, Comments, Navigation, Auth/API-Keys, Site/System), inklusive eines `wiki_graphql`-Escape-Hatch für 100 % Abdeckung.
+1. **Möglichst vollständige Abdeckung der GraphQL-API** — **69 Tools** über alle Domänen (Pages, Tags, Assets inkl. Datei-Upload, Users, Groups, Comments, Navigation, Auth/API-Keys, Site/System), inklusive eines `wiki_graphql`-Escape-Hatch für 100 % Abdeckung.
 2. **Feingranulare Rechtesteuerung** — pro Funktion/Kategorie: _erlaubt_ / _nur mit Genehmigung_ / _geblockt_.
 3. **Echter Mehrbenutzer-Betrieb** — jeder Nutzer mit eigenem API-Key/eigenen Rechten, **ohne** dass der echte Wiki.js-Key zum LLM-Anbieter (ChatGPT/Claude) gelangt.
 
@@ -93,6 +93,9 @@ Im Mehrbenutzer-Modus liegen die echten Keys **als Env-Variable in Vercel** (Ver
 | `WIKIJS_SHOW_BLOCKED` | nein | `false` | geblockte Tools als deaktivierte Stubs in `tools/list` zeigen |
 | `WIKIJS_KEY_MAP` | nein | – | Legacy-Map Handle→Token (nur Token; URL/Policy aus Env). Von `WIKIJS_PROFILES` abgelöst |
 | `WIKIJS_TIMEOUT_MS` | nein | `30000` | Timeout pro GraphQL-Request (AbortController) |
+| `WIKIJS_MAX_CONCURRENCY` | nein | `8` | Max. parallele Upstream-Requests (Overload-Schutz; queued/sheddet bei Überlast) |
+| `WIKIJS_RETRIES` | nein | `2` | Retry nur bei Connection-Fehlern (sicher auch für Mutationen) |
+| `WIKIJS_AUDIT` | nein | `true` | Audit-Log für write/delete/admin (`false` = aus; nie Secrets) |
 | `WIKIJS_MCP_VERBOSE` | nein | `false` | MCP-Request-Logging (`true`) |
 | `PUBLIC_BASE_URL` | nein | aus Headern | überschreibt die im Discovery-Dokument beworbene URL |
 
@@ -334,7 +337,8 @@ lib/
   wikijs/format.ts Ergebnis-/Fehler-Helfer, responseResult-Prüfung, Truncation
   tools/*.ts       Tool-Definitionen je Domäne (deklarativ: Name, Kategorie, Zod-Schema, Handler)
 config/roles.json    Rollen-Definitionen (editierbar; extends + per-Tool; Built-ins als Fallback)
-scripts/           gen-profile.mjs (Handle-Generator) · show-roles.ts · smoke*.mjs · test-policy.ts
+scripts/           gen-profile.mjs (Handle-Generator) · show-roles.ts · smoke*.mjs
+                   test-{policy,nav,semaphore,context}.ts (offline) · test-local-live.ts (live)
 ```
 
 **Stack:** Next.js (App Router) · `mcp-handler` · `@modelcontextprotocol/sdk` · `zod`. Stateless → Vercel-nativ.
@@ -345,6 +349,12 @@ scripts/           gen-profile.mjs (Handle-Generator) · show-roles.ts · smoke*
 
 - **Auto-Preserve bei `wiki_page_update`** — aktuelle Seite wird vor dem Update geholt; nicht angegebene Felder (content, tags, …) bleiben erhalten (verhindert die Wiki.js-Falle, bei der ein Metadaten-Update den Inhalt löscht).
 - **Request-Timeout** — `WIKIJS_TIMEOUT_MS` (Default 30 s) per `AbortController`, kein hängender Serverless-Aufruf.
+- **Überlast-Schutz** — `WIKIJS_MAX_CONCURRENCY` (Default 8) cappt parallele Upstream-Requests; Überzahl wird kurz gequeued, bei anhaltender Last mit „busy" abgewiesen (Load-Shedding) statt in einen DB-Pool-Hang zu laufen.
+- **Retry bei Connection-Fehlern** — `WIKIJS_RETRIES` (Default 2): nur DNS/TCP/TLS-Fehler werden mit Backoff wiederholt (sicher auch für Mutationen, da der Request den Server nie erreichte) — nicht bei Timeouts/GraphQL-Fehlern.
+- **Navigations-Guard** — `wiki_navigation_update_tree` verweigert destruktive Voll-Ersetzungen ohne `force` und liefert stets den `previous`-Snapshot als Rollback.
+- **Escape-Hatch abgesichert** — `wiki_graphql` gibt rohe Mutationen erst als Dry-Run zurück (echte Ausführung mit `confirm:true`).
+- **Audit-Log** — write/delete/admin-Aktionen strukturiert geloggt (Tool, Kategorie, Profil-Label, Outcome, ms; `WIKIJS_AUDIT`; nie Secrets).
+- **Strukturierte Ausgabe** — Tools liefern `structuredContent` zusätzlich zum Text (für MCP-Clients mit strukturiertem Tool-Output).
 - **Content-Truncation** — `wiki_page_get` kürzt sehr lange Inhalte (Default 100 000 Zeichen) mit Hinweis; `maxContentChars: 0` = voll.
 - **ID-oder-Pfad** — `wiki_page_get` / `_delete` / `_move` akzeptieren `id` **oder** `path`+`locale`.
 - **Graceful Shutdown** (stdio): SIGINT/SIGTERM, EPIPE ignoriert.
@@ -355,25 +365,34 @@ scripts/           gen-profile.mjs (Handle-Generator) · show-roles.ts · smoke*
 
 ```bash
 npm run typecheck                  # TypeScript ohne Build
-npm run test:policy                # Policy-Engine-Logik (Presets, Override, tighten-only)
-npm run smoke           -- <url>   # E2E: Handshake, Tool-Sichtbarkeit, Confirm-Gate, Header-Auth
+npm test                           # Offline-Suite: policy + nav + semaphor + context (50 Assertions)
+npm run build                      # Production-Build (Vercel-Artefakt)
+
+# Live-Integrationstest: ALLE Tool-Handler gegen ein WEGWERF-/leeres Wiki.js
+WIKIJS_URL=http://localhost:3000 WIKIJS_TOKEN=<key-oder-admin-jwt> npm run test:live
+
+# E2E gegen ein Deployment (HTTP-Transport):
+npm run smoke           -- <url>   # Handshake, Tool-Sichtbarkeit, Confirm-Gate, Header-Auth
 node scripts/smoke-urlauth.mjs  <url>   # URL-Parameter-Auth (?url=&token=&preset=)
-node scripts/smoke-profiles.mjs <url>   # Profile (Server mit WIKIJS_PROFILES starten)
 node scripts/probe-deploy.mjs   <url>   # Deploy ohne Creds prüfen (Env-Status)
 ```
+
+Vollständiges Per-Tool-Ergebnis (zuletzt **79 ok / 0 FAIL**, alle 69 Tools): **[docs/TESTPROTOKOLL.md](./docs/TESTPROTOKOLL.md)**. Wegwerf-Wiki dafür: `docker compose -f docker-compose.test.yml up -d` (Setup-Automatisierung siehe Protokoll). CI: `.github/workflows/ci.yml`.
 
 ---
 
 ## Grenzen
 
-- **Binärer Datei-Upload** von Assets läuft in Wiki.js über einen Multipart-REST-Endpoint (`/u`), **nicht** über GraphQL — daher bewusst nicht enthalten (die Asset-**Verwaltung** ist vollständig abgedeckt).
+- **Datei-Upload** läuft in Wiki.js über einen Multipart-REST-Endpoint (`/u`, nicht GraphQL) — abgedeckt durch `wiki_asset_upload` (Base64-Eingabe); ebenso Ordner anlegen, Umbenennen und Löschen.
 - Manche Operationen verlangen in Wiki.js erhöhte Scopes (`manage:system`, `write:pages`, …). Fehlt dem Key die Berechtigung, kommt ein Wiki.js-Autorisierungsfehler — unabhängig von der hiesigen Policy.
+- `wiki_page_convert` md→html wird von Wiki.js abgelehnt (Server-Limit, nicht alle Editor-Kombinationen sind konvertierbar); das Tool meldet die Server-Antwort korrekt.
 
 ---
 
 ## Weitere Doku
 
-- [docs/roles.md](./docs/roles.md) (Rollen × Rechte-Matrix) · [docs/clients-claude.md](./docs/clients-claude.md) · [docs/clients-chatgpt.md](./docs/clients-chatgpt.md) · [docs/permissions.md](./docs/permissions.md) · [docs/admin-extension.md](./docs/admin-extension.md)
+- **Rechte & Clients:** [docs/roles.md](./docs/roles.md) (Rollen × Rechte-Matrix) · [docs/permissions.md](./docs/permissions.md) · [docs/clients-claude.md](./docs/clients-claude.md) · [docs/clients-chatgpt.md](./docs/clients-chatgpt.md) · [docs/admin-extension.md](./docs/admin-extension.md)
+- **Test & Betrieb:** [docs/TESTPROTOKOLL.md](./docs/TESTPROTOKOLL.md) (vollständiges Protokoll, alle 69 Tools) · [docs/pgbouncer.md](./docs/pgbouncer.md) (Prod-Hardening: DB-Pool / PgBouncer / MTU / IP-Allowlist)
 
 ## Lizenz
 MIT

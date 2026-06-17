@@ -47,6 +47,14 @@ function confirmPreview(tool: ToolDef, args: Record<string, unknown>): CallToolR
   return { content: [{ type: 'text', text }] };
 }
 
+/** Structured, secret-free audit line for write/delete/admin actions (goes to the server logs). */
+function audit(tool: ToolDef, profile: string | undefined, outcome: string, ms: number): void {
+  if (process.env.WIKIJS_AUDIT === 'false') return;
+  console.log(
+    JSON.stringify({ audit: 'wikijs-mcp', tool: tool.name, category: tool.category, profile: profile ?? null, outcome, ms }),
+  );
+}
+
 /**
  * Register all tools on an McpServer, applying the permission policy:
  *  - registration uses the deployment BASELINE policy (env) to hide blocked tools,
@@ -78,20 +86,34 @@ export function registerAll(server: McpServer): void {
         annotations: annotationsFor(tool),
       },
       async (args: Record<string, unknown>, extra: ToolExtra): Promise<CallToolResult> => {
+        const startedAt = Date.now();
+        let profile: string | undefined;
+        let outcome = 'preview';
         try {
           const ctx = resolveContext(extra);
+          profile = ctx.profile;
           const mode = ctx.policy.resolve(tool.name, tool.category);
           if (mode === 'block') {
+            outcome = 'blocked';
             return fail(
               `Tool '${tool.name}' is blocked by the active permission policy (category: ${tool.category}).`,
             );
           }
           if (mode === 'confirm' && (args as { confirm?: boolean }).confirm !== true) {
+            outcome = 'preview';
             return confirmPreview(tool, args ?? {});
           }
-          return await tool.handler(args ?? {}, ctx);
+          const result = await tool.handler(args ?? {}, ctx);
+          outcome = result.isError ? 'error' : 'ok';
+          return result;
         } catch (e) {
+          outcome = 'error';
           return fail(e instanceof Error ? e.message : String(e));
+        } finally {
+          // Audit non-read actions (executions + blocked attempts); skip reads and dry-run previews.
+          if (tool.category !== 'read' && outcome !== 'preview') {
+            audit(tool, profile, outcome, Date.now() - startedAt);
+          }
         }
       },
     );

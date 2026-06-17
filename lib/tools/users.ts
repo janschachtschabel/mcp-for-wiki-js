@@ -1,7 +1,13 @@
+import { randomBytes } from 'crypto';
 import { z } from 'zod';
-import { ok, fail, assertOk } from '../wikijs/format';
+import { ok, assertOk } from '../wikijs/format';
 import { DEFAULT_RESPONSE, type ToolDef } from './types';
 import type { WikiContext } from '../context';
+
+/** Strong random password: base64url entropy + one char of each class (password-policy compliance). */
+function generatePassword(): string {
+  return randomBytes(16).toString('base64url') + 'A7!z';
+}
 
 const USER_MINIMAL = 'id name email providerKey isSystem isActive createdAt lastLoginAt';
 
@@ -124,7 +130,17 @@ export const userTools: ToolDef[] = [
         },
       );
       assertOk(data.users.create.responseResult, 'Create user');
-      return ok(data.users.create.user, '✅ User created.');
+      // Wiki.js often returns no `user` object on create — look the new user up by email so the
+      // caller gets id/name/email back instead of null.
+      let user = data.users.create.user;
+      if (!user?.id) {
+        const found = await ctx.client.request<{ users: { search: { id: number; name: string; email: string }[] } }>(
+          `query($q:String!){ users { search(query:$q){ id name email } } }`,
+          { q: a.email },
+        );
+        user = found.users.search?.find((u) => u.email?.toLowerCase() === a.email.toLowerCase()) ?? user;
+      }
+      return ok({ ...(user ?? { email: a.email }), groups: a.groups ?? [] }, '✅ User created.');
     },
   },
   {
@@ -184,29 +200,33 @@ export const userTools: ToolDef[] = [
   userIdMutation('wiki_user_deactivate', 'deactivate', 'Deactivate', 'deactivated'),
   userIdMutation('wiki_user_verify', 'verify', 'Verify', 'verified'),
   {
-    // Wiki.js 2.x ships users.resetPassword as a stub resolver that always returns `false`
-    // (no responseResult). We still issue the mutation (forward-compatible if a future
-    // version implements it) but detect the empty result and point to the working path.
+    // Wiki.js 2.x ships users.resetPassword as a no-op stub, so we implement a REAL reset via
+    // the working users.update(newPassword) path. Provide newPassword, or omit it to generate
+    // a strong one (returned once so the admin can hand it over).
     name: 'wiki_user_reset_password',
     description:
-      'Reset a user\'s password by id. NOTE: Wiki.js 2.x does not implement this server-side ' +
-      '(the resolver is a stub) — to actually set a password, use wiki_user_update with newPassword.',
+      "Reset a user's password to a new value. Wiki.js has no self-service reset API, so this SETS a " +
+      'new password via users.update. Pass newPassword, or omit it to auto-generate a strong one — the ' +
+      'new password is returned once in the result, so handle it carefully (the user should change it).',
     category: 'manage_users',
-    inputSchema: { id: z.number().int() },
+    inputSchema: {
+      id: z.number().int(),
+      newPassword: z.string().min(8).optional().describe('New password. Omit to auto-generate a strong random one.'),
+    },
     handler: async (a, ctx) => {
+      const generated = !a.newPassword;
+      const newPassword = a.newPassword ?? generatePassword();
       const data = await ctx.client.request(
-        `mutation($id:Int!){ users { resetPassword(id:$id){ ${DEFAULT_RESPONSE} } } }`,
-        { id: a.id },
+        `mutation($id:Int!,$newPassword:String){ users { update(id:$id,newPassword:$newPassword){ ${DEFAULT_RESPONSE} } } }`,
+        { id: a.id, newPassword },
       );
-      const rr = data?.users?.resetPassword?.responseResult;
-      if (!rr) {
-        return fail(
-          'Wiki.js did not implement users.resetPassword (server returned no result). ' +
-            'To set a password, call wiki_user_update with the newPassword field.',
-        );
-      }
-      assertOk(rr, 'Reset password');
-      return ok({ id: a.id }, '✅ Password reset.');
+      assertOk(data.users.update.responseResult, 'Reset password');
+      return ok(
+        { id: a.id, newPassword, generated },
+        generated
+          ? '✅ Password reset to a generated value (shown once above — share it securely; the user should change it).'
+          : '✅ Password reset.',
+      );
     },
   },
   userIdMutation('wiki_user_disable_tfa', 'disableTFA', 'Disable 2FA for', '2FA disabled'),

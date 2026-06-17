@@ -11,6 +11,8 @@ Ein MCP-Server für Wiki.js: volle GraphQL-API-Abdeckung, Mehrbenutzer-Betrieb m
 | [**Rollen & Rechte-Matrix**](./roles.md) | Tabelle aller Rollen × Rechte (leser → systemadmin), Klartext, eigene Rollen |
 | [Rechtesteuerung](./permissions.md) | Rollen, `allow`/`confirm`/`block`, Obergrenze, pro-User-Verschärfung |
 | [Ausbaustufe 1: Admin-Tools](./admin-extension.md) | Wofür die noch nicht als Einzel-Tool gebauten Admin-Funktionen sind (Theming, Storage, Mail, …) |
+| [**Testprotokoll**](./TESTPROTOKOLL.md) | Vollständiges Per-Tool-Ergebnis (alle 69 Tools, 79/0 live) + Reproduktion |
+| [Prod-Hardening](./pgbouncer.md) | DB-Pool / PgBouncer (transaction-mode) / MSS-Clamping / Vercel-IP-Allowlist |
 
 ---
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ok, assertOk } from '../wikijs/format';
+import { ok, fail, assertOk } from '../wikijs/format';
 import { DEFAULT_RESPONSE, type ToolDef } from './types';
 
 export const assetTools: ToolDef[] = [
@@ -48,6 +48,25 @@ export const assetTools: ToolDef[] = [
       );
       assertOk(data.assets.createFolder.responseResult, 'Create asset folder');
       return ok({ slug: a.slug }, '✅ Asset folder created.');
+    },
+  },
+  {
+    name: 'wiki_asset_upload',
+    description:
+      'Upload a file/image into an asset folder. Pass the file content base64-encoded in contentBase64.',
+    category: 'write',
+    inputSchema: {
+      filename: z.string().min(1).describe('Target filename (Wiki.js sanitizes it).'),
+      contentBase64: z.string().min(1).describe('File content, base64-encoded.'),
+      folderId: z.number().int().default(0).describe('Target asset folder id (0 = root).'),
+      mime: z.string().optional().describe('MIME type, e.g. "image/png". Defaults to octet-stream.'),
+    },
+    handler: async (a, ctx) => {
+      const data = Buffer.from(a.contentBase64, 'base64');
+      if (data.length === 0) return fail('contentBase64 decoded to 0 bytes — provide valid base64 file content.');
+      const r = await ctx.client.upload({ filename: a.filename, data, mime: a.mime, folderId: a.folderId ?? 0 });
+      if (!r.succeeded) return fail(`Upload failed: ${r.message ?? 'unknown error'}`);
+      return ok({ filename: a.filename, folderId: a.folderId ?? 0, bytes: data.length }, '✅ Asset uploaded.');
     },
   },
   {

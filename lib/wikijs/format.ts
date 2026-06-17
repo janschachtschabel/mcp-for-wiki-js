@@ -8,10 +8,15 @@ export interface ResponseStatus {
   message?: string | null;
 }
 
-/** Build a successful tool result. `data` is pretty-printed unless it is a string. */
+/** Build a successful tool result. `data` is pretty-printed unless it is a string.
+ *  Also mirrors the payload as `structuredContent` (always an object) for MCP clients that
+ *  consume structured tool output — the text content stays for backward compatibility. */
 export function ok(data: unknown, note?: string): CallToolResult {
   const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  return { content: [{ type: 'text', text: note ? `${note}\n\n${text}` : text }] };
+  return {
+    content: [{ type: 'text', text: note ? `${note}\n\n${text}` : text }],
+    structuredContent: { data },
+  };
 }
 
 /** Build an error tool result (isError = true). */
